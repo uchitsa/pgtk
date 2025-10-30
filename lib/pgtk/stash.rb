@@ -60,21 +60,36 @@ class Pgtk::Stash
       @entrance.with_write_lock do
         tables.each do |t|
           @stash[:tables][t]&.each do |q|
-            @stash[:queries].delete(q)
+            if @stash[:queries][q]
+              @stash[:queries][q].each do |params_key, cached_data|
+                @stash[:queries][q][params_key] = {
+                  result: cached_data[:result],
+                  valid: false,
+                  last_invalidated: Time.now
+                }
+              end
+            end
           end
-          @stash[:tables].delete(t)
         end
       end
     else
       key = params.map(&:to_s).join(' -*&%^- ')
       @entrance.with_write_lock { @stash[:queries][pure] ||= {} }
-      ret = @stash[:queries][pure][key]
-      if ret.nil?
+      cached = @stash[:queries][pure][key]
+      if cached && cached[:valid]
+        update_usage_stats(pure, key)
+        ret = cached[:result]
+      else
         ret = @pgsql.exec(pure, params, result)
         unless pure.include?(' NOW() ')
           @entrance.with_write_lock do
             @stash[:queries][pure] ||= {}
-            @stash[:queries][pure][key] = ret
+            @stash[:queries][pure][key] = {
+              result: ret,
+              valid: true,
+              last_used: Time.now
+            }
+            update_usage_stats(pure, key)
             tables = pure.scan(/(?<=^|\s)(?:FROM|JOIN) ([a-z_]+)(?=\s|$)/).map(&:first).uniq
             tables.each do |t|
               @stash[:tables][t] = [] if @stash[:tables][t].nil?
