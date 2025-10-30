@@ -35,10 +35,13 @@ class Pgtk::Stash
   # @param [Object] pgsql PostgreSQL connection object
   # @param [Hash] stash Optional existing stash to use (default: new empty stash)
   # @param [Loog] loog Logger for debugging (default: null logger)
-  def initialize(pgsql, stash = { queries: {}, tables: {} })
+  def initialize(pgsql, stash = { queries: {}, tables: {}, bthread: nil })
     @pgsql = pgsql
     @stash = stash
     @entrance = Concurrent::ReentrantReadWriteLock.new
+    @bthread_running = true
+    
+    start_background_refresh_thread unless @stash[:bthread]&.alive?
   end
 
   # Execute a SQL query with optional caching.
